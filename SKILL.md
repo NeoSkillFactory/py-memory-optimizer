@@ -23,15 +23,9 @@ This skill provides static analysis of Python code to identify memory-intensive 
 
 ### System Requirements
 - Python 3.8+
-- pip package manager
 
-### Python Packages (installed automatically via package.json)
-- astroid (optional, for enhanced AST analysis)
-- tabulate (for formatted output)
-- rich (for colored terminal output)
-- click (for CLI interface)
-- pydantic (for data validation)
-- python-slugify (for report naming)
+### Python Packages
+None — uses only the Python standard library (`ast`, `argparse`, `json`, `pathlib`).
 
 ## Installation
 
@@ -39,15 +33,13 @@ This skill provides static analysis of Python code to identify memory-intensive 
 npm install --global openclaw-skill-py-memory-optimizer
 ```
 
-The skill will automatically install Python dependencies on first run.
-
 ## Usage
 
 ### CLI Interface
 
 ```bash
 # Analyze a single file
-py-memory-optimizer analyze path/to/script.py
+python3 scripts/main.py analyze path/to/script.py
 
 # Analyze entire directory
 py-memory-optimizer analyze ./my_project --recursive

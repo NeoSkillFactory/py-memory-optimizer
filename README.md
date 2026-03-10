@@ -21,8 +21,6 @@
 npm install --global openclaw-skill-py-memory-optimizer
 ```
 
-The skill will automatically install Python dependencies on first run.
-
 ## GitHub
 
 Source code: [github.com/NeoSkillFactory/py-memory-optimizer](https://github.com/NeoSkillFactory/py-memory-optimizer)

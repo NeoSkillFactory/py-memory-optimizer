@@ -3,6 +3,8 @@
 
 import os
 import sys
+from pathlib import Path
+
 import pytest
 
 # Add scripts dir to path
@@ -220,3 +222,178 @@ class TestSampleFiles:
         mutable = [i for i in issues if i["type"] == "mutable_default_arg"]
         assert len(unclosed) == 0
         assert len(mutable) == 0
+
+
+# ---------------------------------------------------------------------------
+# Additional edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestGlobalContainerAppend:
+    def test_detects_global_append(self):
+        code = (
+            "_cache = []\n"
+            "def add(item):\n"
+            "    _cache.append(item)\n"
+        )
+        issues = analyzer.analyze_source(code, "test.py")
+        types = [i["type"] for i in issues]
+        assert "global_container_append" in types
+
+    def test_no_issue_for_local_variable(self):
+        code = (
+            "def process():\n"
+            "    items = []\n"
+            "    items.append(1)\n"
+        )
+        issues = analyzer.analyze_source(code, "test.py")
+        global_issues = [i for i in issues if i["type"] == "global_container_append"]
+        assert len(global_issues) == 0
+
+    def test_no_issue_for_parameter(self):
+        code = (
+            "def process(items):\n"
+            "    items.append(1)\n"
+        )
+        issues = analyzer.analyze_source(code, "test.py")
+        global_issues = [i for i in issues if i["type"] == "global_container_append"]
+        assert len(global_issues) == 0
+
+    def test_detects_extend_on_global(self):
+        code = (
+            "results = []\n"
+            "def save(data):\n"
+            "    results.extend(data)\n"
+        )
+        issues = analyzer.analyze_source(code, "test.py")
+        types = [i["type"] for i in issues]
+        assert "global_container_append" in types
+
+
+class TestEdgeCases:
+    def test_empty_source(self):
+        issues = analyzer.analyze_source("", "empty.py")
+        assert issues == []
+
+    def test_syntax_error_raises(self):
+        with pytest.raises(SyntaxError):
+            analyzer.analyze_source("def foo(:\n", "bad.py")
+
+    def test_async_function_mutable_default(self):
+        code = "async def func(items=[]):\n    pass\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        types = [i["type"] for i in issues]
+        assert "mutable_default_arg" in types
+
+    def test_set_default_detected(self):
+        code = "def func(items={1, 2}):\n    pass\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        types = [i["type"] for i in issues]
+        assert "mutable_default_arg" in types
+
+    def test_nested_list_comp(self):
+        code = "result = [y for x in range(100) for y in range(100)]\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        comp = [i for i in issues if i["type"] == "large_list_comprehension"]
+        assert len(comp) == 1
+
+    def test_range_with_start_and_step(self):
+        code = "result = [x for x in range(0, 20000, 2)]\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        comp = [i for i in issues if i["type"] == "large_list_comprehension"]
+        assert len(comp) == 1
+        assert comp[0]["size_estimate"] == 10000
+        assert comp[0]["severity"] == "medium"
+
+    def test_concat_in_async_for(self):
+        code = "async def f():\n    s = ''\n    async for x in gen():\n        s += x\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        types = [i["type"] for i in issues]
+        assert "string_concat_in_loop" in types
+
+    def test_issue_fields_complete(self):
+        """Every issue dict should have required keys."""
+        code = "f = open('test.txt')\n"
+        issues = analyzer.analyze_source(code, "test.py")
+        for iss in issues:
+            assert "type" in iss
+            assert "file" in iss
+            assert "line" in iss
+            assert "message" in iss
+            assert "severity" in iss
+
+
+class TestOptimizerEdgeCases:
+    def test_unclosed_file_no_arg(self):
+        issue = {"type": "unclosed_file", "file_arg": None}
+        result = optimizer.generate_suggestion(issue)
+        assert "path" in result["example"]
+
+    def test_global_container_suggestion(self):
+        issue = {"type": "global_container_append"}
+        result = optimizer.generate_suggestion(issue)
+        assert "suggestion" in result
+        assert "estimated_savings" in result
+
+    def test_unnecessary_list_suggestion(self):
+        issue = {"type": "unnecessary_list_call"}
+        result = optimizer.generate_suggestion(issue)
+        assert "generator" in result["suggestion"].lower()
+
+
+class TestMainModule:
+    """Tests for main.py functions."""
+
+    def test_collect_python_files_single_file(self, tmp_path):
+        f = tmp_path / "test.py"
+        f.write_text("x = 1\n")
+        from main import collect_python_files
+        files = collect_python_files(str(f), False, [])
+        assert len(files) == 1
+
+    def test_collect_python_files_nonexistent(self):
+        from main import collect_python_files
+        files = collect_python_files("/nonexistent/path", False, [])
+        assert files == []
+
+    def test_collect_python_files_exclude(self, tmp_path):
+        (tmp_path / "a.py").write_text("x = 1\n")
+        (tmp_path / "b_test.py").write_text("x = 1\n")
+        from main import collect_python_files
+        files = collect_python_files(str(tmp_path), False, ["*_test.py"])
+        names = [f.name for f in files]
+        assert "a.py" in names
+        assert "b_test.py" not in names
+
+    def test_analyze_file_returns_enriched_issues(self):
+        from main import analyze_file
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "assets", "sample_code", "bad_practices.py"
+        )
+        issues = analyze_file(Path(path))
+        assert len(issues) > 0
+        # Each issue should have a suggestion key from the optimizer
+        for iss in issues:
+            assert "suggestion" in iss
+
+    def test_generate_report_json(self):
+        from main import generate_report
+        import json as _json
+        issues = [{"type": "test", "file": "a.py", "line": 1,
+                    "message": "msg", "severity": "low"}]
+        report = generate_report(issues, "json", False, False, 1)
+        parsed = _json.loads(report)
+        assert parsed["total_issues"] == 1
+
+    def test_generate_report_text_no_issues(self):
+        from main import generate_report
+        report = generate_report([], "text", False, False, 1)
+        assert "No issues found" in report
+
+    def test_generate_report_markdown(self):
+        from main import generate_report
+        issues = [{"type": "test", "file": "a.py", "line": 1,
+                    "message": "msg", "severity": "low", "suggestion": "fix it",
+                    "example": "x = 1", "estimated_savings": "50%"}]
+        report = generate_report(issues, "markdown", True, True, 1)
+        assert "# Memory Analysis Report" in report
+        assert "fix it" in report
