@@ -25,8 +25,6 @@ npm install --global openclaw-skill-py-memory-optimizer
 
 Source code: [github.com/NeoSkillFactory/py-memory-optimizer](https://github.com/NeoSkillFactory/py-memory-optimizer)
 
-**Price suggestion:** $19.99 USD
-
 ## License
 
 MIT © NeoSkillFactory
